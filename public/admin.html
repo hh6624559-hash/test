@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Kênh người bán</title>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+<style>
+.panel input:not([type=checkbox]),.panel select{width:100%;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+.fg{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:0 12px}
+.ord select{width:auto}
+</style>
+</head>
+<body>
+<header>
+  <h1>Kênh người bán</h1>
+  <div class="tabs"><button id="back">← Về cửa hàng</button><button id="out" hidden>Đăng xuất</button></div>
+</header>
+<main id="sell" style="display:block">
+  <section class="panel gate" id="gate">
+    <h2 style="margin:0 0 4px">Kênh người bán</h2>
+    <p class="note" style="margin:0">Nhập mật khẩu để xem đơn hàng.</p>
+    <input id="pw" type="password" autocomplete="current-password" placeholder="Mật khẩu người bán" aria-label="Mật khẩu người bán">
+    <button class="cta" id="lb">Đăng nhập</button>
+    <p class="note" id="gmsg" role="status"></p>
+  </section>
+  <div id="sbody" hidden>
+    <section class="stats" id="stats"></section>
+    <section class="panel"><h2>Hàng cần chuẩn bị (đơn chưa hoàn thành)</h2><div class="tw" id="agg"></div></section>
+    <section class="panel">
+      <h2 id="ft">Thêm sản phẩm</h2>
+      <div class="fg">
+        <div><label for="pe">Biểu tượng</label><input id="pe" maxlength="8" placeholder="🍗"></div>
+        <div><label for="pn">Tên</label><input id="pn"></div>
+        <div><label for="pp">Giá (đ)</label><input id="pp" type="number" min="1"></div>
+        <div><label for="pu">Đơn vị</label><input id="pu" placeholder="cái, kg, hộp..."></div>
+        <div><label for="ps">Tồn kho</label><input id="ps" type="number" min="0"></div>
+      </div>
+      <label for="pd">Mô tả (không bắt buộc)</label><input id="pd">
+      <label style="display:flex;gap:8px;align-items:center;color:var(--ink)"><input id="pa" type="checkbox" checked style="width:auto"> Đang bán (bỏ tick để ẩn khỏi cửa hàng)</label>
+      <p class="note" id="perr" role="alert" style="color:var(--hot)"></p>
+      <div class="acts"><button class="sm" onclick="saveProd()">Lưu sản phẩm</button><button class="sm" onclick="resetForm()">Làm mới form</button></div>
+      <div class="tw" id="prods" style="margin-top:12px"></div>
+      <p class="note">Tồn kho về 0 thì khách không đặt được món đó. Cần ngừng bán tạm thời thì bỏ tick "Đang bán" thay vì xóa.</p>
+    </section>
+    <section class="panel">
+      <div class="acts" style="justify-content:space-between;margin:0"><h2 style="margin:0">Danh sách đơn</h2><button class="sm" id="csv">Xuất file Excel (CSV)</button></div>
+      <div class="tabs" id="flt" role="group" aria-label="Lọc đơn">
+        <button data-flt="all" aria-pressed="true">Tất cả</button><button data-flt="new" aria-pressed="false">Chờ nhận</button>
+        <button data-flt="doing" aria-pressed="false">Đang xử lý</button><button data-flt="done" aria-pressed="false">Hoàn thành</button><button data-flt="cancel" aria-pressed="false">Đã hủy</button>
+      </div>
+      <div id="orders"></div>
+    </section>
+  </div>
+</main>
+<div class="modal" id="lbx" hidden><img id="lbi" alt="Ảnh thanh toán" style="max-width:100%;max-height:92vh;border-radius:8px;background:#fff"></div>
+<script>
+const $=id=>document.getElementById(id);
+const esc=t=>String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const vnd=n=>Number(n).toLocaleString('vi-VN')+' đ';
+const ST=['Mới','Nhận đơn','Chuẩn bị','Đã giao','Đã hủy'];
+const LB={'Mới':'Chờ nhận đơn','Nhận đơn':'Đã nhận đơn','Chuẩn bị':'Đang chuẩn bị hàng','Đã giao':'Hoàn thành','Đã hủy':'Đã hủy'};
+const PM={COD:'Tiền mặt khi nhận hàng',CK_NHAN:'Chuyển khoản khi nhận hàng',CK_TRUOC:'Đã thanh toán trước (chuyển khoản)'};
+const FL={all:()=>true,new:o=>o.status==='Mới',doing:o=>o.status==='Nhận đơn'||o.status==='Chuẩn bị',done:o=>o.status==='Đã giao',cancel:o=>o.status==='Đã hủy'};
+const pend=o=>['Mới','Nhận đơn','Chuẩn bị'].includes(o.status);
+let T=sessionStorage.getItem('t')||'',O=[],PR=[],editId=null,flt='all';
+
+async function api(u,m='GET',b){
+  const r=await fetch('/api/admin/'+u,{method:m,headers:{'Content-Type':'application/json',Authorization:'Bearer '+T},body:b?JSON.stringify(b):undefined});
+  const d=await r.json().catch(()=>({}));
+  if(r.status===401&&u!=='login'){logout();throw new Error('Phiên đăng nhập đã hết hạn')}
+  if(!r.ok)throw new Error(d.error||'Có lỗi xảy ra');return d}
+function logout(){T='';sessionStorage.removeItem('t');show()}
+function show(){const on=!!T;$('gate').hidden=on;$('sbody').hidden=!on;$('out').hidden=!on;if(on)loadAll().catch(()=>{})}
+$('out').onclick=logout;$('back').onclick=()=>{location.href='/'};
+$('lb').onclick=async()=>{$('gmsg').textContent='';try{T=(await api('login','POST',{password:$('pw').value})).token;sessionStorage.setItem('t',T);$('pw').value='';show()}catch(e){$('gmsg').textContent=e.message}};
+$('pw').addEventListener('keydown',e=>{if(e.key==='Enter')$('lb').click()});
+const loadAll=()=>Promise.all([loadOrders(),loadProds()]);
+
+/* ----- Đơn hàng ----- */
+async function loadOrders(){O=await api('orders');drawOrders()}
+function drawOrders(){
+  const rev=O.filter(o=>o.status!=='Đã hủy').reduce((a,o)=>a+o.total,0);
+  $('stats').innerHTML=[[O.length,'Tổng số đơn'],[O.filter(FL.new).length,'Chờ nhận đơn'],[O.filter(pend).length,'Chưa hoàn thành'],[vnd(rev),'Doanh thu (không tính đơn hủy)']].map(s=>`<div class="stat"><b>${s[0]}</b><span>${s[1]}</span></div>`).join('');
+  const m={};O.filter(pend).forEach(o=>o.items.forEach(x=>{const k=x.name+'|'+x.unit;m[k]=m[k]||{n:x.name,u:x.unit,q:0};m[k].q+=x.qty}));
+  const rows=Object.values(m).sort((a,b)=>b.q-a.q);
+  $('agg').innerHTML=rows.length?`<table><tr><th>Món</th><th class="r">Số lượng</th></tr>${rows.map(r=>`<tr><td>${esc(r.n)}</td><td class="r">${r.q} ${esc(r.u)}</td></tr>`).join('')}</table>`:'<p class="note">Không có đơn nào cần chuẩn bị.</p>';
+  document.querySelectorAll('#flt button').forEach(b=>b.setAttribute('aria-pressed',b.dataset.flt===flt));
+  const l=O.filter(FL[flt]);
+  $('orders').innerHTML=l.length?l.map(o=>`<div class="ord"><div class="top"><span><span class="cn">${esc(o.code)}</span><span class="cp">${esc(o.name)} – ${esc(o.phone)}</span></span><span class="ct">${vnd(o.total)}</span></div>
+  <small>${new Date(o.created).toLocaleString('vi-VN')} · ${esc(o.ship_method)} · ${esc(PM[o.method]||o.method)}</small>
+  <div class="lines">${o.items.map(x=>`<div class="ln"><span class="pn">${esc(x.name)}</span><span class="pq">${x.qty} ${esc(x.unit)}</span></div>`).join('')}</div>
+  <small>Địa chỉ: ${esc(o.address)}</small>${o.map_url?`<a class="pk" href="${esc(o.map_url)}" target="_blank" rel="noopener noreferrer">📍 Xem vị trí trên Google Maps</a>`:''}
+  <div class="acts"><select data-id="${o.id}" aria-label="Trạng thái đơn ${esc(o.code)}">${ST.map(s=>`<option value="${s}"${s===o.status?' selected':''}>${LB[s]}</option>`).join('')}</select>
+  ${o.has_proof?`<button class="sm" data-proof="${o.id}">Xem ảnh thanh toán</button>`:''}<button class="sm" data-del="${o.id}">Xóa đơn</button></div></div>`).join(''):'<p class="note">Không có đơn nào trong mục này.</p>'}
+$('flt').addEventListener('click',e=>{if(e.target.dataset.flt){flt=e.target.dataset.flt;drawOrders()}});
+$('orders').addEventListener('change',async e=>{const id=e.target.dataset.id;if(!id)return;try{await api('orders/'+id,'PATCH',{status:e.target.value})}catch(x){alert(x.message)}loadAll()});
+$('orders').addEventListener('click',async e=>{const b=e.target;
+  if(b.dataset.proof){try{const d=await api('orders/'+b.dataset.proof+'/proof');$('lbi').src=d.proof;$('lbx').hidden=false}catch(x){alert(x.message)}}
+  if(b.dataset.del&&confirm('Xóa đơn này? Nếu đơn chưa hủy, hàng sẽ được trả về kho. Không thể hoàn tác.')){try{await api('orders/'+b.dataset.del,'DELETE')}catch(x){alert(x.message)}loadAll()}});
+$('lbx').onclick=()=>{$('lbx').hidden=true};
+document.addEventListener('keydown',e=>{if(e.key==='Escape')$('lbx').hidden=true});
+$('csv').onclick=()=>{
+  const c=v=>{v=String(v??'');if(/^[=+\-@\t\r]/.test(v))v="'"+v;return '"'+v.replace(/"/g,'""')+'"'};
+  const rows=[['Mã đơn','Thời gian','Khách','SĐT','Địa chỉ','Vị trí','Nhận hàng','Thanh toán','Các món','Tổng (đ)','Trạng thái'],
+    ...O.map(o=>[o.code,new Date(o.created).toLocaleString('vi-VN'),o.name,o.phone,o.address,o.map_url,o.ship_method,PM[o.method]||o.method,o.items.map(x=>`${x.name} x${x.qty} ${x.unit}`).join('; '),o.total,LB[o.status]||o.status])];
+  const a=document.createElement('a');a.href=URL.createObjectURL(new Blob(['\ufeff'+rows.map(r=>r.map(c).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'}));
+  a.download='don-hang.csv';a.click();URL.revokeObjectURL(a.href)};
+
+/* ----- Sản phẩm ----- */
+async function loadProds(){PR=await api('products');
+  $('prods').innerHTML=PR.length?`<table><tr><th>Sản phẩm</th><th class="r">Giá</th><th class="r">Tồn</th><th>Bán</th><th></th></tr>${PR.map((p,i)=>`<tr><td>${esc(p.emoji)} ${esc(p.name)}</td><td class="r">${vnd(p.price)} / ${esc(p.unit)}</td><td class="r">${p.stock}</td><td>${p.active?'Có':'Ẩn'}</td>
+  <td><button class="sm" onclick="edit(${i})">Sửa</button> <button class="sm" onclick="del(${p.id})">Xóa</button></td></tr>`).join('')}</table>`:'<p class="note">Chưa có sản phẩm. Điền form phía trên để thêm.</p>'}
+function edit(i){const p=PR[i];editId=p.id;$('ft').textContent='Sửa sản phẩm';$('pe').value=p.emoji;$('pn').value=p.name;$('pp').value=p.price;$('pu').value=p.unit;$('ps').value=p.stock;$('pd').value=p.descr;$('pa').checked=!!p.active;$('ft').scrollIntoView()}
+function resetForm(){editId=null;$('ft').textContent='Thêm sản phẩm';['pe','pn','pp','pu','ps','pd'].forEach(id=>$(id).value='');$('pa').checked=true;$('perr').textContent=''}
+async function saveProd(){$('perr').textContent='';
+  try{await api(editId?'products/'+editId:'products',editId?'PUT':'POST',{emoji:$('pe').value,name:$('pn').value,price:$('pp').value,unit:$('pu').value,stock:$('ps').value,descr:$('pd').value,active:$('pa').checked});resetForm();loadProds()}
+  catch(e){$('perr').textContent=e.message}}
+async function del(id){if(!confirm('Xóa sản phẩm này? Đơn cũ vẫn giữ nguyên.'))return;try{await api('products/'+id,'DELETE');loadProds()}catch(e){alert(e.message)}}
+show();
+</script>
+</body>
+</html>

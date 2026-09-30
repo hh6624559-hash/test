@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Cửa hàng – Đặt hàng online</title>
+<link href="https://fonts.googleapis.com/css2?family=Be+Vietnam+Pro:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<header>
+  <h1 id="h1">Cửa hàng</h1>
+  <p id="tag"></p>
+  <div class="tabs" role="group" aria-label="Chọn kênh">
+    <button id="tb" aria-pressed="true">Mua hàng</button>
+    <button id="th" aria-pressed="false">Lịch sử đơn hàng</button>
+    <button id="ts" aria-pressed="false">Kênh người bán</button>
+  </div>
+</header>
+<main id="shop">
+  <section class="list" id="list" aria-label="Danh sách sản phẩm"></section>
+  <aside aria-label="Giỏ hàng">
+    <h2>Đơn hàng của bạn</h2>
+    <div id="sum"></div>
+    <div class="total"><span>Tổng cộng</span><span id="grand">0 đ</span></div>
+    <label for="nm">Họ tên</label><input id="nm" autocomplete="name" maxlength="60">
+    <label for="ph">Số điện thoại</label><input id="ph" type="tel" autocomplete="tel" inputmode="tel" maxlength="20">
+    <div class="pk" id="phn" role="status"></div>
+    <label for="ad">Địa chỉ giao hàng (nếu giao tận nơi)</label><textarea id="ad" rows="2" autocomplete="street-address" maxlength="300"></textarea>
+    <label style="margin-top:12px">Vị trí giao hàng trên Google Maps (không bắt buộc)</label>
+    <div class="acts" style="margin:0"><button type="button" class="sm" id="gps">📍 Gửi vị trí hiện tại của tôi</button></div>
+    <input id="mpin" maxlength="300" inputmode="url" autocomplete="off" placeholder="Hoặc dán link vị trí từ Google Maps (Chia sẻ → Sao chép liên kết)" style="margin-top:8px">
+    <div class="pk" id="locn" role="status"></div>
+    <fieldset class="opt"><legend>Hình thức nhận hàng *</legend>
+      <label><input type="radio" name="ship" value="Giao tận nơi"> Giao tận nơi</label>
+      <label><input type="radio" name="ship" value="Nhận tại cửa hàng"> Nhận tại cửa hàng</label>
+    </fieldset>
+    <fieldset class="opt"><legend>Thanh toán *</legend><div id="pms"></div></fieldset>
+    <div id="bank" class="note" hidden>
+      <div class="qrbox" id="qrbox" hidden><img id="qr" alt="Mã QR chuyển khoản"></div>
+      <div id="bankt"></div>
+      <div class="proof" id="proof" hidden>
+        <label for="pf" style="margin-top:8px;color:var(--ink);font-weight:600">Ảnh chụp màn hình đã thanh toán *</label>
+        <input id="pf" type="file" accept="image/*">
+        <img id="pfp" alt="Ảnh đã thanh toán" hidden>
+      </div>
+    </div>
+    <input class="hp" id="hp" tabindex="-1" autocomplete="off" aria-hidden="true">
+    <button class="cta" id="ok" disabled>Đặt hàng</button>
+    <button class="cta ghost" id="clr">Xóa giỏ hàng</button>
+    <div id="msg" role="status"></div>
+  </aside>
+</main>
+<main id="hist" hidden style="display:block">
+  <section class="panel">
+    <div class="acts" style="justify-content:space-between;margin:0"><h2 style="margin:0">Lịch sử mua hàng của bạn</h2><button class="sm" id="hclear">Xóa lịch sử</button></div>
+    <p class="note">Lịch sử được lưu trên thiết bị này, trạng thái đơn tự cập nhật. Bấm “Mua lại” để đặt lại đơn cũ.</p>
+    <div id="hlist"></div>
+  </section>
+</main>
+<p class="note" id="foot" style="text-align:center;padding:0 20px 30px"></p>
+<div class="modal" id="done" role="dialog" aria-modal="true" aria-labelledby="dtitle" hidden>
+  <div class="box">
+    <div class="tick" aria-hidden="true">✓</div>
+    <h2 id="dtitle" style="margin:0 0 6px">Đặt hàng thành công!</h2>
+    <p style="margin:0;color:var(--mute)">Cửa hàng sẽ sớm liên hệ để xác nhận và giao hàng.</p>
+    <div id="dsum"></div>
+    <button class="cta" id="dclose">Tiếp tục mua sắm</button>
+  </div>
+</div>
+<script>
+const $=id=>document.getElementById(id);
+const esc=t=>String(t??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const f=n=>Number(n).toLocaleString('vi-VN')+' đ';
+const LB={'Mới':'Chờ nhận đơn','Nhận đơn':'Đã nhận đơn','Chuẩn bị':'Đang chuẩn bị hàng','Đã giao':'Hoàn thành','Đã hủy':'Đã hủy'};
+const PM={COD:'Tiền mặt khi nhận hàng',CK_NHAN:'Chuyển khoản khi nhận hàng',CK_TRUOC:'Thanh toán luôn (quét mã QR)'};
+let CFG={bank:{}},P=[],q={},PROOF='',ML='',T0=Date.now(),H=[];
+try{H=JSON.parse(localStorage.getItem('hist')||'[]')}catch(e){}
+const saveH=()=>{try{localStorage.setItem('hist',JSON.stringify(H.slice(0,50)))}catch(e){}};
+const shipVal=()=>(document.querySelector('input[name=ship]:checked')||{}).value;
+const pmVal=()=>(document.querySelector('input[name=pm]:checked')||{}).value;
+const sub=()=>P.reduce((a,p)=>a+(q[p.id]||0)*p.price,0);
+const fee=s=>s===0||shipVal()==='Nhận tại cửa hàng'||s>=CFG.freeShip?0:CFG.shipFee;
+const getJ=async u=>(await fetch(u)).json();
+
+/* ----- Số điện thoại Việt Nam ----- */
+function vnPhone(v){const s=String(v).replace(/[\s.\-()]/g,'');
+  if(!/^(\+?84|0)\d{9,10}$/.test(s))return{ok:false,n:'',msg:'Không hợp lệ ở Việt Nam (cần 10 số bắt đầu bằng 0 hoặc +84).'};
+  const n='0'+s.replace(/^(\+?84|0)/,'');
+  if(/^0(3[2-9]|5[25689]|7[06-9]|8[1-9]|9\d)\d{7}$/.test(n))return{ok:true,n,msg:'Số di động hợp lệ ở Việt Nam.'};
+  if(/^02\d{9}$/.test(n))return{ok:true,n,msg:'Số bàn hợp lệ (nên dùng số di động để shipper liên hệ).'};
+  return{ok:false,n:'',msg:'Đầu số không có ở Việt Nam hoặc sai độ dài, vui lòng kiểm tra lại.'}}
+const PHINT='Số hợp lệ ở Việt Nam: 10 số, đầu 03/05/07/08/09 (hoặc +84).';
+$('phn').textContent=PHINT;
+$('ph').addEventListener('input',()=>{const v=$('ph').value.trim(),e=$('phn');
+  if(!v){e.className='pk';e.textContent=PHINT}else{const r=vnPhone(v);e.className='pk '+(r.ok?'ok':'bad');e.textContent=(r.ok?'✓ ':'✗ ')+r.msg}bank()});
+
+/* ----- Vị trí Google Maps ----- */
+const MAPRE=/^https:\/\/(?:www\.google\.com\/maps|maps\.google\.com|maps\.app\.goo\.gl|goo\.gl\/maps)(?:[\/?#][\w\-.~:\/?#@!$()*+,;=%&]*)?$/;
+function setML(u,t){ML=u;$('locn').textContent=t||'';$('locn').className='pk'+(u?' ok':t?' bad':'')}
+$('gps').onclick=()=>{
+  if(!navigator.geolocation)return setML('','Trình duyệt không hỗ trợ định vị, hãy dán link Google Maps.');
+  setML('','Đang lấy vị trí...');
+  navigator.geolocation.getCurrentPosition(p=>{$('mpin').value='';setML(`https://www.google.com/maps?q=${p.coords.latitude.toFixed(6)},${p.coords.longitude.toFixed(6)}`,'✓ Đã lấy vị trí hiện tại của bạn.')},
+    ()=>setML('','Không lấy được vị trí. Hãy cho phép định vị hoặc dán link Google Maps.'),{timeout:10000})};
+$('mpin').addEventListener('input',()=>{const v=$('mpin').value.trim();
+  if(!v)return setML('','');MAPRE.test(v)?setML(v,'✓ Link Google Maps hợp lệ.'):setML('','✗ Chỉ nhận link Google Maps (google.com/maps hoặc maps.app.goo.gl).')});
+
+/* ----- Ảnh chụp màn hình thanh toán (nén còn tối đa 900px) ----- */
+function clearProof(){PROOF='';$('pf').value='';$('pfp').hidden=true;$('pfp').removeAttribute('src')}
+$('pf').addEventListener('change',()=>{const fl=$('pf').files[0];if(!fl)return clearProof();
+  if(!/^image\//.test(fl.type)){clearProof();$('msg').textContent='Hãy chọn một file ảnh.';return}
+  const im=new Image(),u=URL.createObjectURL(fl);
+  im.onload=()=>{const k=Math.min(1,900/Math.max(im.width,im.height)),c=document.createElement('canvas');
+    c.width=Math.round(im.width*k);c.height=Math.round(im.height*k);c.getContext('2d').drawImage(im,0,0,c.width,c.height);
+    PROOF=c.toDataURL('image/jpeg',.7);$('pfp').src=PROOF;$('pfp').hidden=false;URL.revokeObjectURL(u)};
+  im.onerror=()=>{clearProof();$('msg').textContent='Không đọc được ảnh này, hãy chọn ảnh khác.'};im.src=u});
+
+/* ----- Hiển thị ----- */
+function render(){
+  $('list').innerHTML=P.length?P.map(p=>{const n=q[p.id]||0,sold=p.stock<1;
+    return `<div class="item${sold?' sold':''}"><div class="emo" aria-hidden="true">${esc(p.emoji||'🛒')}</div>
+    <div><div class="name">${esc(p.name)}</div><div class="price">${f(p.price)} / ${esc(p.unit||'cái')} · ${sold?'Hết hàng':'Còn '+p.stock}</div>${p.descr?`<div class="price">${esc(p.descr)}</div>`:''}<div class="line">${n?f(n*p.price):''}</div></div>
+    <div class="qty"><button data-d="-1" data-id="${p.id}" aria-label="Giảm" ${sold||!n?'disabled':''}>−</button><input data-id="${p.id}" inputmode="numeric" value="${n}" aria-label="Số lượng ${esc(p.name)}" ${sold?'disabled':''}><button data-d="1" data-id="${p.id}" aria-label="Tăng" ${sold?'disabled':''}>+</button></div></div>`}).join('')
+    :'<p class="empty">Cửa hàng chưa có sản phẩm. Vào Kênh người bán để thêm sản phẩm đầu tiên.</p>';
+  const s=sub(),fe=fee(s);
+  $('sum').innerHTML=s?P.filter(p=>q[p.id]).map(p=>`<div class="row"><span>${esc(p.name)} × ${q[p.id]}</span><span>${f(q[p.id]*p.price)}</span></div>`).join('')+(fe?`<div class="row"><span>Phí giao hàng (miễn phí từ ${f(CFG.freeShip)})</span><span>${f(fe)}</span></div>`:''):'<div class="empty">Chưa chọn sản phẩm nào.</div>';
+  $('grand').textContent=f(s+fe);$('ok').disabled=!s;bank();
+}
+function bank(){
+  const m=pmVal(),on=m==='CK_NHAN'||m==='CK_TRUOC';$('bank').hidden=!on;if(!on)return;
+  const B=CFG.bank,ph=vnPhone($('ph').value),c='DH '+(ph.ok?ph.n:'SĐT của bạn'),pay=m==='CK_TRUOC',s=sub();
+  $('bankt').textContent=`Chuyển khoản tới: STK ${B.acc}${B.holder?' – '+B.holder:''}. Nội dung chuyển khoản: ${c}.`;
+  $('qrbox').hidden=!pay||!s;$('proof').hidden=!pay;
+  if(pay&&s)$('qr').src=`https://img.vietqr.io/image/${encodeURIComponent(B.bin)}-${encodeURIComponent(B.acc)}-compact2.png?amount=${s+fee(s)}&addInfo=${encodeURIComponent(c)}&accountName=${encodeURIComponent(B.holder)}`}
+const setQ=(id,v)=>{const p=P.find(x=>x.id==id);v=Math.max(0,Math.min(99,p.stock,Math.floor(+v)||0));v?q[id]=v:delete q[id];render()};
+$('list').addEventListener('click',e=>{const b=e.target.closest('button');if(!b||b.disabled)return;setQ(b.dataset.id,(q[b.dataset.id]||0)+ +b.dataset.d)});
+$('list').addEventListener('change',e=>{if(e.target.tagName==='INPUT')setQ(e.target.dataset.id,e.target.value)});
+$('clr').onclick=()=>{q={};$('msg').textContent='';render()};
+document.querySelectorAll('input[name=ship]').forEach(r=>r.addEventListener('change',render));
+$('dclose').onclick=()=>{$('done').hidden=true};
+document.addEventListener('keydown',e=>{if(e.key==='Escape')$('done').hidden=true});
+
+/* ----- Đặt hàng ----- */
+$('ok').onclick=async()=>{
+  const m=t=>{$('msg').textContent=t};
+  const nm=$('nm').value.trim(),pv=vnPhone($('ph').value),ad=$('ad').value.trim(),sh=shipVal(),pm=pmVal();
+  if($('hp').value)return;
+  if(nm.length<2||!$('ph').value.trim())return m('Vui lòng nhập họ tên và số điện thoại.');
+  if(!pv.ok)return m('Số điện thoại: '+pv.msg);
+  if(!sh)return m('Vui lòng chọn hình thức nhận hàng.');
+  if(sh==='Giao tận nơi'&&ad.length<8)return m('Vui lòng nhập địa chỉ giao hàng đầy đủ.');
+  if(!pm)return m('Vui lòng chọn hình thức thanh toán.');
+  if(pm==='CK_TRUOC'&&!PROOF)return m('Vui lòng đính kèm ảnh chụp màn hình đã thanh toán.');
+  const chosen=P.filter(p=>q[p.id]);$('ok').disabled=true;m('Đang gửi đơn...');
+  try{
+    const r=await fetch('/api/orders',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:nm,phone:pv.n,address:ad,shipMethod:sh,mapUrl:ML,method:pm,proof:pm==='CK_TRUOC'?PROOF:'',hp:$('hp').value,t:Date.now()-T0,items:chosen.map(p=>({id:p.id,qty:q[p.id]}))})});
+    const d=await r.json();
+    if(!r.ok){m(d.error||'Không đặt được hàng.');return}
+    const items=chosen.map(p=>[p.name,q[p.id],p.price,p.unit||'cái']);
+    H.unshift({code:d.code,d:new Date().toLocaleString('vi-VN'),items,total:d.total,s:'Mới'});saveH();
+    $('dsum').textContent=items.map(x=>`- ${x[0]}: ${x[1]} ${x[3]} = ${f(x[1]*x[2])}`).join('\n')+(d.ship?`\nPhí giao hàng: ${f(d.ship)}`:'')+`\nTổng cộng: ${f(d.total)}\nMÃ ĐƠN: ${d.code}\nNhận hàng: ${sh}\nThanh toán: ${PM[pm]}`+(pm==='CK_NHAN'?`\nChuyển khoản tới STK ${CFG.bank.acc} – nội dung: DH ${pv.n}`:'');
+    q={};clearProof();m('');P=await getJ('/api/products');render();$('done').hidden=false;$('dclose').focus();
+  }catch(e){m('Không kết nối được máy chủ. Kiểm tra mạng rồi thử lại.')}
+  finally{$('ok').disabled=!sub()}
+};
+
+/* ----- Lịch sử đơn và theo dõi trạng thái ----- */
+function drawHist(){
+  $('hlist').innerHTML=H.length?H.map((h,k)=>`<div class="ord"><div class="top"><span><span class="cn">${esc(h.code)}</span> <span class="pill">${esc(LB[h.s]||h.s)}</span></span><span class="ct">${f(h.total)}</span></div><small>${esc(h.d)}</small>
+  <div class="lines">${h.items.map(x=>`<div class="ln"><span class="pn">${esc(x[0])}</span><span class="pq">${x[1]} ${esc(x[3]||'')}</span></div>`).join('')}</div>
+  <div class="acts"><button class="sm" data-re="${k}">Mua lại</button></div></div>`).join(''):'<p class="empty">Bạn chưa có đơn nào trên thiết bị này.</p>'}
+async function track(){if(!H.length)return;
+  try{const r=await getJ('/api/track?codes='+H.slice(0,20).map(h=>h.code).join(','));let ch=false;
+    H.forEach(h=>{if(r[h.code]&&r[h.code]!==h.s){h.s=r[h.code];ch=true}});if(ch){saveH();drawHist()}}catch(e){}}
+$('hlist').addEventListener('click',e=>{const k=e.target.dataset.re;if(k===undefined)return;
+  q={};H[k].items.forEach(x=>{const p=P.find(p=>p.name===x[0]&&p.stock>0);if(p)q[p.id]=Math.min(x[1],p.stock)});render();view('shop')});
+$('hclear').onclick=()=>{if(confirm('Xóa lịch sử đơn hàng trên thiết bị này?')){H=[];saveH();drawHist()}};
+setInterval(()=>{if(!$('hist').hidden)track()},10000);
+function view(v){$('shop').hidden=v!=='shop';$('hist').hidden=v!=='hist';$('tb').setAttribute('aria-pressed',v==='shop');$('th').setAttribute('aria-pressed',v==='hist');
+  if(v==='hist'){drawHist();track()}}
+$('tb').onclick=()=>view('shop');$('th').onclick=()=>view('hist');$('ts').onclick=()=>{location.href='/admin.html'};
+
+(async()=>{
+  try{[CFG,P]=await Promise.all([getJ('/api/config'),getJ('/api/products')])}catch(e){$('list').innerHTML='<p class="empty">Không tải được sản phẩm. Vui lòng tải lại trang sau ít phút.</p>';return}
+  document.title=CFG.shopName+' – Đặt hàng online';$('h1').textContent=CFG.shopName;$('tag').textContent=CFG.tagline;$('foot').textContent=CFG.footer;
+  const opts=[['COD',PM.COD]];if(CFG.bank.acc)opts.push(['CK_NHAN',PM.CK_NHAN],['CK_TRUOC',PM.CK_TRUOC]);
+  $('pms').innerHTML=opts.map(o=>`<label><input type="radio" name="pm" value="${o[0]}"> ${esc(o[1])}</label>`).join('');
+  document.querySelectorAll('input[name=pm]').forEach(r=>r.addEventListener('change',render));
+  render();
+})();
+</script>
+</body>
+</html>
